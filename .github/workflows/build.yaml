@@ -1,0 +1,111 @@
+name: Build 3dstool
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-x86_64:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Configure CMake
+      run: cmake -B build -A x64
+    - name: Build 3dstool
+      run: cmake --build build --config Release --parallel
+    - name: Flatten executable
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path dist | Out-Null
+        Copy-Item bin/Release/3dstool.exe dist/3dstool.exe
+    - name: Smoke test
+      shell: pwsh
+      run: |
+        $output = & .\dist\3dstool.exe 2>&1 | Out-String
+        Write-Host $output
+        if ($output -match "failed to run|not a valid application|cannot find the file") {
+          Write-Error "3dstool failed to launch"
+          exit 1
+        }
+        if ($output -notmatch "3dstool") {
+          Write-Error "3dstool did not produce expected usage output"
+          exit 1
+        }
+        exit 0
+    - uses: actions/upload-artifact@v7
+      with:
+        name: 3dstool-windows-x86_64
+        path: dist/3dstool.exe
+        if-no-files-found: error
+
+  build-linux-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+    - name: Configure CMake
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+    - name: Build 3dstool
+      run: cmake --build build --parallel $(nproc)
+    - name: Flatten executable
+      run: |
+        mkdir -p dist
+        cp bin/Release/3dstool dist/3dstool
+    - name: Smoke test
+      run: |
+        file dist/3dstool
+        ldd dist/3dstool
+        OUTPUT=$(./dist/3dstool 2>&1 || true)
+        echo "$OUTPUT"
+        if echo "$OUTPUT" | grep -qiE "error while loading|cannot execute|exec format"; then
+          echo "3dstool failed to launch"
+          exit 1
+        fi
+        echo "$OUTPUT" | grep -qi "3dstool" || {
+          echo "3dstool did not produce expected usage output"
+          exit 1
+        }
+    - uses: actions/upload-artifact@v7
+      with:
+        name: 3dstool-linux-x86_64
+        path: dist/3dstool
+        if-no-files-found: error
+
+  build-macos-x86_64:
+    runs-on: macos-26-intel
+    steps:
+    - uses: actions/checkout@v7
+    - name: Configure CMake
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+    - name: Build 3dstool
+      run: cmake --build build --parallel $(sysctl -n hw.ncpu)
+    - name: Flatten executable
+      run: |
+        mkdir -p dist
+        cp bin/Release/3dstool dist/3dstool
+    - name: Smoke test
+      run: |
+        file dist/3dstool
+        otool -L dist/3dstool
+        OUTPUT=$(./dist/3dstool 2>&1 || true)
+        echo "$OUTPUT"
+        if echo "$OUTPUT" | grep -qiE "dyld|library not loaded|bad cpu type|symbol not found"; then
+          echo "3dstool failed to launch"
+          exit 1
+        fi
+        echo "$OUTPUT" | grep -qi "3dstool" || {
+          echo "3dstool did not produce expected usage output"
+          exit 1
+        }
+    - uses: actions/upload-artifact@v7
+      with:
+        name: 3dstool-macos-x86_64
+        path: dist/3dstool
+        if-no-files-found: error
